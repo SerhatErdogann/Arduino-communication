@@ -20,7 +20,6 @@ public class SignalController {
     private TextArea textArea;
 
     private SerialPort port;
-    private List<Integer> data = new ArrayList<>();
 
     @FXML
     private void initialize() {
@@ -30,7 +29,7 @@ public class SignalController {
             while (true) {
                 try {
                     if (port == null || !port.isOpen()) {
-                        connectPort();
+                        connectPortAndMessage();
                     }
                     Thread.sleep(2000);
                 } catch (Exception e) {
@@ -43,7 +42,7 @@ public class SignalController {
         connectionThread.start();
     }
 
-    private void connectPort() {
+    private void connectPortAndMessage() {
         //bilgisayarın tüm usb girişlerini arraye attık
         SerialPort[] ports = SerialPort.getCommPorts();
 
@@ -66,12 +65,28 @@ public class SignalController {
                             @Override
                             public int getListeningEvents() {
                                 //bağlantı koptuğunda tetiklenip serial evente atacak
-                                return SerialPort.LISTENING_EVENT_PORT_DISCONNECTED;
+                                return SerialPort.LISTENING_EVENT_DATA_AVAILABLE | SerialPort.LISTENING_EVENT_PORT_DISCONNECTED;
                             }
 
                             @Override
                             public void serialEvent(SerialPortEvent event) {
-                                if (event.getEventType() == SerialPort.LISTENING_EVENT_PORT_DISCONNECTED) {
+                                if (event.getEventType() == SerialPort.LISTENING_EVENT_DATA_AVAILABLE) {
+                                    try {
+                                        byte[] buffer = new byte[port.bytesAvailable()];
+                                        int numRead = port.getInputStream().read(buffer);
+                                        String gelenMesaj = new String(buffer, 0, numRead);
+
+                                        // JavaFX GUI'de göstermek için
+                                        Platform.runLater(() -> {
+                                            textArea.appendText(gelenMesaj);
+                                        });
+
+                                    } catch (IOException e) {
+                                        e.printStackTrace();
+                                    }
+                                }
+
+                                else if (event.getEventType() == SerialPort.LISTENING_EVENT_PORT_DISCONNECTED) {
                                     Platform.runLater(() -> textArea.appendText("Bağlantı kapatıldı.\n"));
                                     disconnectPort();
                                 }
@@ -110,32 +125,38 @@ public class SignalController {
             }
 
             String input = textField.getText().toLowerCase();
-            int count = 0;
+            long count = 0;
 
             Pattern pattern = Pattern.compile("/(\\d+)");
             Matcher matcher = pattern.matcher(input);
 
             while (matcher.find()) {
-                count += Integer.parseInt(matcher.group(1));}
+                //pattern içindeki regex de her parantez bloğu bir grup oluşturur. ayrımı yapmak için kullandık.
+                try {
+                    // Normal durumda long'a çevir
+                    count += Long.parseLong(matcher.group(1));
 
-            if (count == 0) {
-                textArea.appendText("LED yanması için uygun input girilmedi.\n");
-            } else {
-                textArea.appendText("LED " + count + " kere yakılacak.\n");
+                } catch (NumberFormatException ex) {
+                    // Çok büyük sayı olursa eror atmaması ıcın
+                    count = 10000000;
+                }
             }
-            data.add(count);
+
             inputYollama(count);
 
         } catch (Exception e) {
-            textArea.appendText("Hata: " + e.getMessage() + "\n");
+            e.printStackTrace();
         }
+        textField.clear();
+
     }
-    private void inputYollama(int count) throws IOException {
-
-            System.out.println(count);
-            port.getOutputStream().write(("x"+count+"\n").getBytes());
-            port.getOutputStream().flush();
-
+    private void inputYollama(long count) throws IOException {
+        if (count <= 0) {
+            textArea.appendText("Uygun bir sayı girilmedi.\n");
+            return;
+        }
+        port.getOutputStream().write(("BLINK:" + count + "\n").getBytes());
+        port.getOutputStream().flush();
 
     }
 
@@ -145,9 +166,8 @@ public class SignalController {
             textArea.appendText("Herhangi bir bağlantı yok.\n");
             return;
         }
-        port.getOutputStream().write("1".getBytes());
+        port.getOutputStream().write("LED:ON\n".getBytes());
         port.getOutputStream().flush();
-        textArea.appendText("LED yakıldı.\n");
     }
 
     @FXML
@@ -156,9 +176,8 @@ public class SignalController {
             textArea.appendText("Herhangi bir bağlantı yok.\n");
             return;
         }
-        port.getOutputStream().write("2".getBytes());
+        port.getOutputStream().write("LED:OFF\n".getBytes());
         port.getOutputStream().flush();
-        textArea.appendText("LED kapatıldı.\n");
 
     }
 }
